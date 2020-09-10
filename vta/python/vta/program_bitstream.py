@@ -27,7 +27,7 @@ def main():
                         help="bitstream path")
     args = parser.parse_args()
 
-    if args.target not in ('pynq', 'ultra96', 'de10nano', 'sim', 'tsim'):
+    if args.target not in ('pynq', 'ultra96', 'de10nano', 'sim', 'tsim', 'zcu104_bsim'):
         raise RuntimeError("Unknown target {}".format(args.target))
 
     curr_path = os.path.dirname(
@@ -55,7 +55,7 @@ def de10nano_bitstream_program(bitstream_path):
     program(bitstream_path)
 
 def bitstream_program(target, bitstream):
-    if target in ['pynq', 'ultra96']:
+    if target in ['pynq', 'ultra96', 'zcu104_bsim']:
         pynq_bitstream_program(bitstream)
     elif target in ['de10nano']:
         de10nano_bitstream_program(bitstream)

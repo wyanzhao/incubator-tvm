@@ -52,7 +52,7 @@ port = int(os.environ.get("VTA_RPC_PORT", "9091"))
 
 # We configure both the bitstream and the runtime system on the Pynq
 # to match the VTA configuration specified by the vta_config.json file.
-if env.TARGET == "pynq" or env.TARGET == "de10nano":
+if env.TARGET == "pynq" or env.TARGET == "de10nano" or env.TARGET == "zcu104_bsim":
 
     # Make sure that TVM was compiled with RPC=1
     assert tvm.runtime.enabled("rpc")
@@ -64,7 +64,7 @@ if env.TARGET == "pynq" or env.TARGET == "de10nano":
     # Program the FPGA with a pre-compiled VTA bitstream.
     # You can program the FPGA with your own custom bitstream
     # by passing the path to the bitstream file instead of None.
-    vta.program_fpga(remote, bitstream=None)
+    vta.program_fpga(remote, bitstream="/home/dev/bsim.bit")
 
 # In simulation mode, host the RPC server locally.
 elif env.TARGET in ["sim", "tsim"]:

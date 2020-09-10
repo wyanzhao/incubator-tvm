@@ -228,7 +228,7 @@ def test_conv2d_transpose(device):
             target = env.target
             if env.TARGET not in ["sim", "tsim"]:
                 assert tvm.runtime.enabled("rpc")
-                program_fpga(remote, bitstream=None)
+                program_fpga(remote, bitstream="/home/dev/bsim.bit")
                 reconfig_runtime(remote)
         elif device == "arm_cpu":
             target = env.target_vta_cpu
@@ -239,5 +239,5 @@ def test_conv2d_transpose(device):
     vta.testing.run(_run)
 
 if __name__ == "__main__":
-    test_conv2d_transpose(device="arm_cpu")
+    #test_conv2d_transpose(device="arm_cpu")
     test_conv2d_transpose(device="vta")

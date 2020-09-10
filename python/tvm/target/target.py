@@ -194,6 +194,7 @@ def arm_cpu(model='unknown', options=None):
         "rk3399":    ["-model=rk3399", "-target=aarch64-linux-gnu -mattr=+neon"],
         "pynq":      ["-model=pynq", "-target=armv7a-linux-eabi -mattr=+neon"],
         "ultra96":   ["-model=ultra96", "-target=aarch64-linux-gnu -mattr=+neon"],
+        "zcu104_bsim": ["-model=zcu104_bsim", "-target=aarch64-linux-gnu -mattr=+neon"],
     }
     pre_defined_opt = trans_table.get(model, ["-model=%s" % model])
 

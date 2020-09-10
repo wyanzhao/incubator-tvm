@@ -109,7 +109,7 @@ if env.TARGET not in ["sim", "tsim"]:
     # Otherwise if you have a device you want to program directly from
     # the host, make sure you've set the variables below to the IP of
     # your board.
-    device_host = os.environ.get("VTA_RPC_HOST", "192.168.2.99")
+    device_host = os.environ.get("VTA_RPC_HOST", "10.0.0.208")
     device_port = os.environ.get("VTA_RPC_PORT", "9091")
     if not tracker_host or not tracker_port:
         remote = rpc.connect(device_host, int(device_port))
@@ -121,7 +121,7 @@ if env.TARGET not in ["sim", "tsim"]:
     # by passing the path to the bitstream file instead of None.
     reconfig_start = time.time()
     vta.reconfig_runtime(remote)
-    vta.program_fpga(remote, bitstream=None)
+    vta.program_fpga(remote, bitstream="/home/dev/bsim.bit")
     reconfig_time = time.time() - reconfig_start
     print("Reconfigured FPGA and RPC runtime in {0:.2f}s!".format(reconfig_time))
 
@@ -232,8 +232,8 @@ download.download(image_url, image_fn)
 
 # Prepare test image for inference
 image = Image.open(image_fn).resize((224, 224))
-plt.imshow(image)
-plt.show()
+# plt.imshow(image)
+# plt.show()
 image = np.array(image) - np.array([123., 117., 104.])
 image /= np.array([58.395, 57.12, 57.375])
 image = image.transpose((2, 0, 1))

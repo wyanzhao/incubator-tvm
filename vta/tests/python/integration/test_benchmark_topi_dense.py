@@ -184,7 +184,7 @@ def test_gemm(device="vta", batch=128, in_feat=128, out_feat=128):
             target = env.target
             if env.TARGET not in ["sim", "tsim"]:
                 assert tvm.runtime.enabled("rpc")
-                program_fpga(remote, bitstream=None)
+                program_fpga(remote, bitstream="/home/dev/bsim.bit")
                 reconfig_runtime(remote)
         elif device == "arm_cpu":
             target = env.target_vta_cpu
