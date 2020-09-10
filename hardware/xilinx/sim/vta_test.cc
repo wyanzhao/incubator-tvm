@@ -27,6 +27,7 @@
 #include <iostream>
 
 #include "../src/vta.h"
+#include "../src/vta_bsim.h"
 #include "../../../tests/hardware/common/test_lib.h"
 
 int main(void) {

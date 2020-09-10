@@ -33,6 +33,19 @@
 #endif  // VTA_TARGET_PYNQ
 #include "../common/test_lib.h"
 
+#ifdef VTA_TARGET_ULTRA96
+#include "../../../src/pynq/pynq_driver.h"
+#endif
+
+#ifdef VTA_TARGET_BSIM_ZCU104
+#include "../../../src/bsim_driver/bsim_driver.h"
+#endif
+
+#ifdef VTA_TARGET_DE10_NANO
+#include "../../../src/de10nano/d10nano_drver.h"
+#endif
+
+#if defined (VTA_TARGET_PYNQ) || defined(VTA_TARGET_ULTRA96) || defined(VTA_TARGET_DE10_NANO)
 int main(void) {
 #if VTA_DEBUG == 1
   printParameters();
@@ -68,3 +81,43 @@ int main(void) {
 
   return status;
 }
+#endif
+
+#ifdef VTA_TARGET_BSIM_ZCU104
+int main(void) {
+#if VTA_DEBUG == 1
+  printParameters();
+#endif
+
+  int status = 0;
+
+  // Run ALU test (vector-scalar operators)
+  status |= alu_test_bsim(VTA_ALU_OPCODE_MAX, true, 16, 128, true);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_MAX, true, 16, 128, false);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_ADD, true, 16, 128, true);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_ADD, true, 16, 128, false);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_SHR, true, 16, 128, true);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_SHR, true, 16, 128, false);
+
+  // Run ALU test (vector-vector operators)
+  status |= alu_test_bsim(VTA_ALU_OPCODE_MAX, false, 16, 128, true);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_MAX, false, 16, 128, false);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_ADD, false, 16, 128, true);
+  status |= alu_test_bsim(VTA_ALU_OPCODE_ADD, false, 16, 128, false);
+
+  // Run blocked GEMM test
+  status |= blocked_gemm_test_bsim(256, 256, VTA_BLOCK_OUT*4, true, 2);
+  status |= blocked_gemm_test_bsim(256, 256, VTA_BLOCK_OUT*4, false, 2);
+  status |= blocked_gemm_test_bsim(256, 256, VTA_BLOCK_OUT*4, true, 1);
+  status |= blocked_gemm_test_bsim(256, 256, VTA_BLOCK_OUT*4, false, 1);
+
+  if (status == 0) {
+    printf("\nINFO - Unit tests successful!\n");
+  } else {
+    printf("\nINTO - Unit tests failed!\n");
+  }
+
+  return status;
+}
+
+#endif

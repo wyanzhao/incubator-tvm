@@ -100,9 +100,11 @@ class PkgConfig(object):
                 "-I%s/src/de10nano" % vta_hw_path,
                 "-I%s/3rdparty" % tvm_path
             ]
+        elif self.TARGET in ["zcu104_bsim"]:
+            self.lib_source += glob.glob("%s/src/bsim_driver/*.cc" % vta_hw_path)
 
         # Linker flags
-        if self.TARGET in ["pynq", "ultra96"]:
+        if self.TARGET in ["pynq", "ultra96", "zcu104_bsim"]:
             self.ldflags = [
                 "-L/usr/lib",
                 "-l:libcma.so"]
@@ -149,10 +151,23 @@ class PkgConfig(object):
             self.load_base_addr = "0xFF221000"
             self.compute_base_addr = "0xFF222000"
             self.store_base_addr = "0xFF223000"
-        elif self.TARGET == "ultra96":
-            self.fpga_device = "xczu3eg-sbva484-1-e"
+        elif self.TARGET == "zcu104_bsim":
+            self.fpga_device = "xczu7ev-ffvc1156-2-e"
             self.fpga_family = "zynq-ultrascale+"
-            self.fpga_freq = 333
+            self.fpga_freq = 100
+            self.fpga_per = 2
+            self.fpga_log_axi_bus_width = 7
+            self.axi_prot_bits = '010'
+            # IP register address map
+            self.ip_reg_map_range = "0x100000"
+            self.fetch_base_addr = "0xA0000000"
+            self.load_base_addr = "0xA0001000"
+            self.compute_base_addr = "0xA0002000"
+            self.store_base_addr = "0xA0003000"
+        elif self.TARGET == "ultra96":
+            self.fpga_device = "xczu7ev-ffvc1156-2-e"
+            self.fpga_family = "zynq-ultrascale+"
+            self.fpga_freq = 100
             self.fpga_per = 2
             self.fpga_log_axi_bus_width = 7
             self.axi_prot_bits = '010'

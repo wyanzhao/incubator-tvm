@@ -39,6 +39,18 @@
 #include "../../../src/pynq/pynq_driver.h"
 #endif  // VTA_TARGET_PYNQ
 
+#ifdef VTA_TARGET_ULTRA96
+#include "../../../src/pynq/pynq_driver.h"
+#endif
+
+#ifdef VTA_TARGET_BSIM_ZCU104
+#include "../../../src/bsim_driver/bsim_driver.h"
+#endif
+
+#ifdef VTA_TARGET_DE10_NANO
+#include "../../../src/de10nano/d10nano_drver.h"
+#endif
+
 typedef uint32_t uop_T;
 typedef int8_t wgt_T;
 typedef int8_t inp_T;
@@ -54,9 +66,19 @@ uint64_t vta(
   acc_T *biases,
   inp_T *outputs);
 
+uint64_t vta_bsim(uint32_t instr_count,
+		 	uint8_t *insns,
+		 	uint8_t *uops,
+			uint8_t *inputs,
+			uint8_t *weights,
+			uint8_t *biases,
+			uint8_t *outputs
+);
+
 #else  // NO_SIM
 
 #include "../../../hardware/xilinx/src/vta.h"
+#include "../../../hardware/xilinx/src/vta_bsim.h"
 
 #endif  // NO_SIM
 
@@ -316,6 +338,9 @@ void printMicroOp(int num_uop, VTAUop *uops);
 */
 int alu_test(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression);
 
+
+int alu_test_bsim(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression);
+
 /*!
 * \brief VTA blocked GEMM unit test.
 * \param batch Batch size.
@@ -324,6 +349,9 @@ int alu_test(int opcode, bool use_imm, int batch, int vector_size, bool uop_comp
 * \param uop_compression Apply micro-op compression.
 * \return Number of errors from the test run.
 */
+int blocked_gemm_test_bsim(int batch, int channels, int block, bool uop_compression,
+  int virtual_threads);
+
 int blocked_gemm_test(int batch, int channels, int block, bool uop_compression,
   int virtual_threads);
 
@@ -335,6 +363,8 @@ int blocked_gemm_test(int batch, int channels, int block, bool uop_compression,
 * \param uop_compression Apply micro-op compression.
 * \return Number of errors from the test run.
 */
+int gemm_test_bsim(int batch, int in_channels, int out_channels, bool uop_compression);
+
 int gemm_test(int batch, int in_channels, int out_channels, bool uop_compression);
 
 #endif  //  TESTS_HARDWARE_COMMON_TEST_LIB_H_
