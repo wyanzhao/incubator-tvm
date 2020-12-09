@@ -19,3 +19,11 @@ OUT_MEM = hcl.placeholder((env.OUT_BUFF_SIZE, env.BATCH, env.BLOCK_OUT,),
                           name='out_mem', dtype=hcl.UInt(config.DATA_WIDTH))
 
 DRAM = hcl.placeholder((config.DRAM_SIZE,), name='DRAM', dtype=hcl.UInt(8))
+
+INSNS = hcl.placeholder((1024,), name='insns', dtype=hcl.UInt(128))
+UOPS = hcl.placeholder((1024,), name='uops', dtype=hcl.UInt(8))
+INPUTS = hcl.placeholder((1024,), name='inputs', dtype=hcl.UInt(8))
+WEIGHTS = hcl.placeholder((1024,), name='weights', dtype=hcl.UInt(8))
+BIASES = hcl.placeholder((1024,), name='biases', dtype=hcl.UInt(8))
+OUTPUTS = hcl.placeholder((1024,), name='output', dtype=hcl.UInt(8))
+MAX_INSNS_COUNT = 1024

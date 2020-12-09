@@ -28,8 +28,7 @@ def core(instr, uop_mem, inp_mem, wgt_mem, acc_mem, out_mem, dram):
             #hcl.print(0, "GEMM Instruction\n")
             gemm.gemm(instr, uop_mem, inp_mem, wgt_mem, acc_mem, out_mem)
         with hcl.elif_(opcode == finish.VTA_OPCODE_FINISH):
-            trace_mgr.Event("EXE", "FIN  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            trace_mgr.Event("RET", "FIN  %016lx%016lx\n", (instr[128:64], instr[64:0]))
+            pass
 
 def vta(instr_phy_addr, instr_count, uop_mem, inp_mem, wgt_mem, acc_mem, out_mem, dram):
     '''VTA BSIM Shell'''
@@ -38,7 +37,6 @@ def vta(instr_phy_addr, instr_count, uop_mem, inp_mem, wgt_mem, acc_mem, out_mem
         base = hcl.scalar(instr_phy_addr, name='instr_phy_addr')
         with hcl.for_(0, hcl.scalar(instr_count, name='instr_count'), name="i") as i:
             #hcl.print(i, '\n# Instruction: %d\n')
-            trace_mgr.Event("INSN_IDX", "%4x\n", i)
             inbytes = hcl.compute((ratio,), lambda x: dram[base+x], 'insn_bytes', dtype=dram.dtype)
             insn = hcl.pack(inbytes, name='insn', factor=ratio)
             core(insn[0], uop_mem, inp_mem, wgt_mem, acc_mem, out_mem, dram)

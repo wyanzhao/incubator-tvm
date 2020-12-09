@@ -50,27 +50,18 @@ def load(instr, uop_mem, inp_mem, wgt_mem, acc_mem, dram):
 
     with hcl.Stage("load"):
         with hcl.if_(x_size.v == 0):
-            trace_mgr.Event("EXE", "LNOP %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            trace_mgr.Event("RET", "LNOP %016lx%016lx\n", (instr[128:64], instr[64:0]))
+            pass
         with hcl.elif_(memory_type == VTA_MEM_ID_UOP):
-            trace_mgr.Event("EXE", "LUOP %016lx%016lx\n", (instr[128:64], instr[64:0]))
             load_uop(sram_base, dram_base, x_size, uop_mem, dram)
-            trace_mgr.Event("RET", "LUOP %016lx%016lx\n", (instr[128:64], instr[64:0]))
         with hcl.elif_(memory_type == VTA_MEM_ID_WGT):
-            trace_mgr.Event("EXE", "LWGT %016lx%016lx\n", (instr[128:64], instr[64:0]))
             load_2d(sram_base, dram_base, x_size, y_size, x_stride,
                     y_pad_0, y_pad_1, x_pad_0, x_pad_1, wgt_mem, dram, is_min_pad_value)
-            trace_mgr.Event("RET", "LWGT %016lx%016lx\n", (instr[128:64], instr[64:0]))
         with hcl.elif_(memory_type == VTA_MEM_ID_ACC):
-            trace_mgr.Event("EXE", "LACC %016lx%016lx\n", (instr[128:64], instr[64:0]))
             load_2d(sram_base, dram_base, x_size, y_size, x_stride,
                     y_pad_0, y_pad_1, x_pad_0, x_pad_1, acc_mem, dram, is_min_pad_value)
-            trace_mgr.Event("RET", "LACC %016lx%016lx\n", (instr[128:64], instr[64:0]))
         with hcl.elif_(memory_type == VTA_MEM_ID_INP):
-            trace_mgr.Event("EXE", "LINP %016lx%016lx\n", (instr[128:64], instr[64:0]))
             load_2d(sram_base, dram_base, x_size, y_size, x_stride,
                     y_pad_0, y_pad_1, x_pad_0, x_pad_1, inp_mem, dram, is_min_pad_value)
-            trace_mgr.Event("RET", "LINP %016lx%016lx\n", (instr[128:64], instr[64:0]))
 
 def load_uop(sram_base, dram_base, x_size, uop_mem, dram):
     '''load uop submodule'''
@@ -84,7 +75,6 @@ def load_uop(sram_base, dram_base, x_size, uop_mem, dram):
                                 dtype=dram.dtype)
             burst = hcl.pack(burst, name="uop", factor=ratio)
             uop_mem[sram_idx] = burst[0]
-            trace_mgr.Event("LD_SRAM", "%03x %08x\n", (sram_idx, uop_mem[sram_idx]))
 
 def load_2d(sram_base, dram_base, x_size, y_size, x_stride,
             y_pad_0, y_pad_1, x_pad_0, x_pad_1, sram, dram, is_min_pad_value):
@@ -103,11 +93,9 @@ def load_2d(sram_base, dram_base, x_size, y_size, x_stride,
            x_size
     '''
     _, nrows, ncols = sram.shape
-    #hcl.print((nelem, nrows, ncols), "- shape: nElem= %d, nRows = %d, nCols = %d\n")
     sram_bits, dram_bits = hcl.get_bitwidth(sram.dtype), hcl.get_bitwidth(dram.dtype)
     ratio, remainder = divmod(sram_bits, dram_bits)
     assert remainder == 0, 'we get into trouble'
-    trace_fmt = " %08x" if sram_bits == 32 else " %02x"
     with hcl.Stage("load_2d"):
         y_tot = hcl.cast(hcl.UInt(32), y_size.v + y_pad_0.v + y_pad_1.v)
         x_tot = hcl.cast(hcl.UInt(32), x_size.v + x_pad_0.v + x_pad_1.v)
@@ -144,18 +132,9 @@ def load_2d(sram_base, dram_base, x_size, y_size, x_stride,
             def clear(row, col):
                 sram[sram_idx][row][col] = pad_val
             hcl.mutate((nrows, ncols), clear, name='pad_clear')
-        def trace_sram(y, x):
-            sram_idx = sram_base + x_tot * y + x
-            def trace_vector(row, col):
-                trace_mgr.Event("+LD_SRAM", trace_fmt, sram[sram_idx][row][col])
-            trace_mgr.Event("LD_SRAM", "%03x", sram_idx)
-            hcl.mutate((nrows, ncols), trace_vector, name='trace_vector')
-            trace_mgr.Event("+LD_SRAM", "\n")
 
         hcl.mutate((y_pad_0, x_tot), pad_top, 'pad_top')
         hcl.mutate((y_size, x_pad_0), pad_left, 'pad_left')
         hcl.mutate((y_size, x_size), load_data, 'load_data')
         hcl.mutate((y_size, x_pad_1), pad_right, 'pad_right')
         hcl.mutate((y_pad_1, x_tot), pad_bottom, 'pad_bottom')
-        if trace_mgr.Enabled():
-            hcl.mutate((y_tot, x_tot), trace_sram, 'trace_sram')

@@ -61,54 +61,12 @@ def alu(instr, uop_mem, acc_mem, out_mem):
     dst_factor_in = hcl.scalar(instr[86:75], name="dst_factor_in")
     src_factor_out = hcl.scalar(instr[97:86], name="src_factor_out")
     src_factor_in = hcl.scalar(instr[108:97], name="src_factor_in")
-    alu_opcode = hcl.scalar(instr[111:108], name="alu_opcode") # update to 3 bits
-    use_imm = hcl.scalar(instr[112:111], name="use_imm", dtype=hcl.UInt(1))
-    imm = hcl.scalar(instr[128:112], name="imm")
+    alu_opcode = hcl.scalar(instr[110:108], name="alu_opcode") # update to 3 bits
+    use_imm = hcl.scalar(instr[111:110], name="use_imm", dtype=hcl.UInt(1))
+    imm = hcl.scalar(instr[128:111], name="imm")
 
     # Compute blocks such as the following one that are only used for tracing
     # can be made conditional to the trace being enabled.
-    if trace_mgr.Enabled():
-        with hcl.if_(alu_opcode.v == VTA_ALU_OPCODE_MIN):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("EXE", "MINI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("EXE", "MIN  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_MAX):
-            with hcl.if_(use_imm == 1):
-                trace_mgr.Event("EXE", "MAXI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("EXE", "MAX  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_ADD):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("EXE", "ADDI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("EXE", "ADD  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_SHR):
-            with hcl.if_(instr[127] == 1):
-                with hcl.if_(use_imm.v == 1):
-                    trace_mgr.Event("EXE", "SHLI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-                with hcl.else_():
-                    trace_mgr.Event("EXE", "SHL  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                with hcl.if_(use_imm.v == 1):
-                    trace_mgr.Event("EXE", "SHRI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-                with hcl.else_():
-                    trace_mgr.Event("EXE", "SHR  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_CLP):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("EXE", "CLPI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("EXE", "CLP  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_MOV):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("EXE", "MOVI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("EXE", "MOV  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.else_():
-            trace_mgr.Event("EXE", "CNOP %016lx%016lx\n")
-
-    trace_mgr.Event("ALU_LOOP", "%04x %04x %04x %04x\n",
-                    (iter_out, iter_in, uop_bgn, uop_end))
 
     _, nrows, ncols = acc_mem.shape
     def fmutate(i, j, k):  # i <--iter_out   j <-- iter_in   k <-- 0 to (uop_end-uop_bgn)
@@ -120,7 +78,6 @@ def alu(instr, uop_mem, acc_mem, out_mem):
         inp_idx += j * hcl.cast(hcl.UInt(16), src_factor_in.v) + \
                    i * hcl.cast(hcl.UInt(16), src_factor_out.v)
         dst_tensor, src_tensor = acc_mem[acc_idx], acc_mem[inp_idx]
-        trace_mgr.Event("ALU_ITR", "%04x %04x %04x %03x", (i, j, k, acc_idx))
 
         with hcl.for_(0, nrows) as x:
             with hcl.for_(0, ncols) as y:
@@ -137,17 +94,15 @@ def alu(instr, uop_mem, acc_mem, out_mem):
                     dst_tensor[x][y] = dst + src
                 with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_SHR):
                     dst_tensor[x][y] = hcl.select(src >= 0, dst >> src, dst << -src)
-                with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_CLP):
-                    dst_tensor[x][y] = hcl.select(dst >= (-1 * src),
-                                                  hcl.select(dst <= src, dst_tensor[x][y], src),
-                                                  (-1 * src))
-                with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_MOV):
-                    dst_tensor[x][y] = src
-                with hcl.else_():
-                    hcl.print(alu_opcode, 'ERROR: unknown alu_opcode: %d\n')
-                    dst_tensor[x][y] = 0
-                trace_mgr.Event("+ALU_ITR", ' %08x', dst_tensor[x][y])
-        trace_mgr.Event("+ALU_ITR", "\n")
+                # with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_CLP):
+                #     dst_tensor[x][y] = hcl.select(dst >= (-1 * src),
+                #                                   hcl.select(dst <= src, dst_tensor[x][y], src),
+                #                                   (-1 * src))
+                # with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_MOV):
+                #     dst_tensor[x][y] = src
+                # with hcl.else_():
+                #     #hcl.print(alu_opcode, 'ERROR: unknown alu_opcode: %d\n')
+                #     dst_tensor[x][y] = 0
 
         def fmutate_out(row, col):
             out_mem[acc_idx][row][col] = hcl.cast(out_mem.dtype, acc_mem[acc_idx][row][col])
@@ -157,43 +112,3 @@ def alu(instr, uop_mem, acc_mem, out_mem):
         domain = (hcl.cast(hcl.UInt(32), iter_out.v), hcl.cast(hcl.UInt(32), iter_in.v),
                   (hcl.cast(hcl.UInt(32), uop_end.v-uop_bgn.v)))
         hcl.mutate(domain, fmutate)
-
-    if trace_mgr.Enabled():
-        with hcl.if_(alu_opcode.v == VTA_ALU_OPCODE_MIN):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("RET", "MINI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("RET", "MIN  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_MAX):
-            with hcl.if_(use_imm == 1):
-                trace_mgr.Event("RET", "MAXI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("RET", "MAX  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_ADD):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("RET", "ADDI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("RET", "ADD  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_SHR):
-            with hcl.if_(instr[127] == 1):
-                with hcl.if_(use_imm.v == 1):
-                    trace_mgr.Event("RET", "SHLI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-                with hcl.else_():
-                    trace_mgr.Event("RET", "SHL  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                with hcl.if_(use_imm.v == 1):
-                    trace_mgr.Event("RET", "SHRI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-                with hcl.else_():
-                    trace_mgr.Event("RET", "SHR  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_CLP):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("RET", "CLPI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("RET", "CLP  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.elif_(alu_opcode.v == VTA_ALU_OPCODE_MOV):
-            with hcl.if_(use_imm.v == 1):
-                trace_mgr.Event("RET", "MOVI %016lx%016lx\n", (instr[128:64], instr[64:0]))
-            with hcl.else_():
-                trace_mgr.Event("RET", "MOV  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        with hcl.else_():
-            trace_mgr.Event("RET", "CNOP %016lx%016lx\n")

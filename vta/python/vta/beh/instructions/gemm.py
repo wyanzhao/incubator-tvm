@@ -2,6 +2,7 @@
 from functools import partial
 import heterocl as hcl
 from ..config import env
+from .. import state
 
 # Opcode, GEMM encoding
 VTA_OPCODE_GEMM = 2
@@ -13,7 +14,7 @@ ENCODING = {
 }
 
 # gemm_struct = utils.make_struct(encoding)
-def gemm(instr, uop_mem, inp_mem, wgt_mem, acc_mem, out_mem):
+def gemm(instr, uop_mem, acc_mem, inp_mem, wgt_mem, out_mem):
     '''gemm instruction'''
     with hcl.Stage("gemm"):
         reset_reg = hcl.scalar(instr[8:7], name="reset_reg")
@@ -28,15 +29,11 @@ def gemm(instr, uop_mem, inp_mem, wgt_mem, acc_mem, out_mem):
         wgt_factor_out = hcl.scalar(instr[118:108], name="wgt_factor_out")
         wgt_factor_in = hcl.scalar(instr[128:118], name="wgt_factor_in")
 
-        trace_mgr.Event("EXE", "GEM  %016lx%016lx\n", (instr[128:64], instr[64:0]))
-        trace_mgr.Event("GEM_LOOP", "%04x %04x %04x %04x\n",
-                        (iter_out, iter_in, uop_bgn, uop_end))
         #hcl.print(reset_reg, "- reset_reg = %d\n")
 
         gemm_core(reset_reg, iter_out, iter_in, uop_bgn, uop_end, dst_factor_out, dst_factor_in,
                   src_factor_out, src_factor_in, wgt_factor_out, wgt_factor_in,
                   uop_mem, inp_mem, wgt_mem, acc_mem, out_mem)
-        trace_mgr.Event("RET", "GEM  %016lx%016lx\n", (instr[128:64], instr[64:0]))
 
 def decode_uop(uop):
     acc_idx = hcl.scalar(uop[11:0], dtype=hcl.UInt(16))
@@ -77,12 +74,6 @@ def gemm_core(reset_reg, iter_out, iter_in, uop_bgn, uop_end, dst_factor_out, ds
         def fmutate_out(row, col):
             out_mem[acc_idx][row][col] = hcl.cast(out_mem.dtype, acc_mem[acc_idx][row][col])
         hcl.mutate(otensor.shape, fmutate_out)
-        if trace_mgr.Enabled():
-            trace_mgr.Event("GEM_ITR", "%04x %04x %04x %03x", (i, j, k, acc_idx))
-            with hcl.for_(0, batch) as row:
-                with hcl.for_(0, blkout) as col:
-                    trace_mgr.Event("+GEM_ITR", " %08x", acc_mem[acc_idx][row][col])
-            trace_mgr.Event("+GEM_ITR", "\n")
 
     def fmutate_reset(i, j, k):
         k += uop_bgn.v
@@ -93,12 +84,6 @@ def gemm_core(reset_reg, iter_out, iter_in, uop_bgn, uop_end, dst_factor_out, ds
         def fmutate_out_0(row, col):
             acc_mem[acc_idx][row][col] = 0
         hcl.mutate((batch, blkout), fmutate_out_0)
-        if trace_mgr.Enabled():
-            trace_mgr.Event("GEM_ITR", "%04x %04x %04x %03x", (i, j, k, acc_idx))
-            with hcl.for_(0, batch) as row:
-                with hcl.for_(0, blkout) as col:
-                    trace_mgr.Event("+GEM_ITR", " %08x", acc_mem[acc_idx][row][col])
-            trace_mgr.Event("+GEM_ITR", "\n")
 
     with hcl.Stage("gemm_core"):
         domain = (hcl.cast(hcl.UInt(32), iter_out.v), hcl.cast(hcl.UInt(32), iter_in.v),
