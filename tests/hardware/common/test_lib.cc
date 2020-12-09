@@ -783,7 +783,7 @@ void printMicroOp(int num_uop, VTAUop *uops) {
     printf("acc=%u, inp= %u, wgt=%u\n", uops[i].dst_idx, uops[i].src_idx, uops[i].wgt_idx);
   }
 }
-
+/* 
 int alu_test(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression) {
   // Some assertions
   assert(batch % VTA_BATCH == 0);
@@ -1533,10 +1533,10 @@ int gemm_test(int batch, int in_channels, int out_channels, bool uop_compression
     printf("INFO - Blocked GEMM test failed, got %d errors!\n", err);
     return -1;
   }
-}
+} */
 
 
-int alu_test_bsim(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression) {
+/* int alu_test_bsim(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression) {
   // Some assertions
   assert(batch % VTA_BATCH == 0);
   assert(vector_size % VTA_BLOCK_OUT == 0);
@@ -2244,6 +2244,762 @@ int gemm_test_bsim(int batch, int in_channels, int out_channels, bool uop_compre
       (ap_uint<8> *) weight_buf,
       (ap_uint<8> *) bias_buf,
       (ap_uint<8> *) output_buf, &done);
+#endif
+
+  // Unpack output data
+  out_T **outputs = alloc2dArray<out_T>(batch, out_channels);
+  unpackBuffer<out_T, VTA_OUT_WIDTH, uint32_t, 32>(outputs,
+                                                   output_buf,
+                                                   batch,
+                                                   out_channels,
+                                                   VTA_BATCH,
+                                                   VTA_BLOCK_OUT);
+
+  // Correctness checks
+  int err = 0;
+  for (int i = 0; i < batch; i++) {
+    for (int j = 0; j < out_channels; j++) {
+      if (outputs_ref[i][j] != outputs[i][j]) {
+        err++;
+#if VTA_DEBUG == 1
+        printf("DEBUG - %d, %d: expected 0x%x but got 0x%x\n", i, j,
+               static_cast<int>(outputs_ref[i][j]),
+               static_cast<int>(outputs[i][j]));
+#endif
+      }
+    }
+  }
+
+  // Free all allocated arrays
+  free2dArray<inp_T>(inputs, batch, in_channels);
+  free2dArray<wgt_T>(weights, out_channels, in_channels);
+  free2dArray<acc_T>(biases, batch, out_channels);
+  free2dArray<out_T>(outputs_ref, batch, out_channels);
+  free2dArray<out_T>(outputs, batch, out_channels);
+  freeBuffer(insn_buf);
+  freeBuffer(uop_buf);
+  freeBuffer(input_buf);
+  freeBuffer(weight_buf);
+  freeBuffer(bias_buf);
+  freeBuffer(output_buf);
+
+  if (err == 0) {
+    printf("INFO - Blocked GEMM test successful!\n");
+    return 0;
+  } else {
+    printf("INFO - Blocked GEMM test failed, got %d errors!\n", err);
+    return -1;
+  }
+} */
+
+int alu_test_bsim_v1(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression) {
+  // Some assertions
+  assert(batch % VTA_BATCH == 0);
+  assert(vector_size % VTA_BLOCK_OUT == 0);
+  printf("=====================================================================================\n");
+  printf("INFO - ALU test of %s: batch=%d, vector_size=%d, uop_compression=%d\n",
+    getOpcodeString(opcode, use_imm), batch, vector_size, uop_compression);
+
+  // Instruction count
+  int ins_size = 3 * batch / VTA_BATCH + 2;
+  // Micro op count
+  int uop_size = uop_compression ? 1 : vector_size / VTA_BLOCK_OUT;
+  // Input/output elements in each transfer
+  int tx_size = vector_size / VTA_BLOCK_OUT;
+  // Number of input sets to be generated
+  int input_sets = (use_imm) ? 1 : 2;
+  // Make sure we don't exceed buffer bounds
+  assert(uop_size <= VTA_UOP_BUFF_DEPTH);
+  assert(tx_size * input_sets <= VTA_ACC_BUFF_DEPTH);
+
+  // Immediate values
+  acc_T *immediate = static_cast<acc_T *>(malloc(sizeof(acc_T) * batch / VTA_BATCH));
+  for (int b = 0; b < batch / VTA_BATCH; b++) {
+    if (opcode == VTA_ALU_OPCODE_MIN) {
+      immediate[b] = static_cast<acc_T>(
+          rand_r(&globalSeed) % (1LL << (VTA_ALUOP_IMM_BIT_WIDTH - 1)) - (1LL << (VTA_ALUOP_IMM_BIT_WIDTH - 2)));
+    } else if (opcode == VTA_ALU_OPCODE_MAX) {
+      immediate[b] = static_cast<acc_T>(
+          rand_r(&globalSeed) % (1LL << (VTA_ALUOP_IMM_BIT_WIDTH - 1)) - (1LL << (VTA_ALUOP_IMM_BIT_WIDTH - 2)));
+    } else if (opcode == VTA_ALU_OPCODE_ADD) {
+      immediate[b] = static_cast<acc_T>(
+          rand_r(&globalSeed) % (1LL << (VTA_ALUOP_IMM_BIT_WIDTH - 1)) - (1LL << (VTA_ALUOP_IMM_BIT_WIDTH - 2)));
+    } else if (opcode == VTA_ALU_OPCODE_SHR) {
+      immediate[b] = static_cast<acc_T>(
+          rand_r(&globalSeed) % (1LL << (VTA_SHR_ARG_BIT_WIDTH - 1)) - (1LL << (VTA_SHR_ARG_BIT_WIDTH - 2)));
+    }
+    // else if (opcode == VTA_ALU_OPCODE_MUL) {
+    //   immediate[b] = static_cast<acc_T>(
+    //       rand_r(&globalSeed) % (1LL << (VTA_MUL_ARG_BIT_WIDTH - 1)) - (1LL << (VTA_MUL_ARG_BIT_WIDTH - 2)));
+    // }
+  }
+
+  // Initialize instructions
+  VTAGenericInsn *insn_buf =
+      static_cast<VTAGenericInsn *>(allocBuffer(sizeof(VTAGenericInsn) * ins_size));
+  int insn_idx = 0;
+  insn_buf[insn_idx++] =
+      get1DLoadStoreInsn(VTA_OPCODE_LOAD, VTA_MEM_ID_UOP, 0, 0, uop_size, 0, 0, 0, 0);
+  for (int b = 0; b < batch; b += VTA_BATCH) {
+    insn_buf[insn_idx++] = get2DLoadStoreInsn(
+        VTA_OPCODE_LOAD,                   // opcode
+        VTA_MEM_ID_ACC,                    // vector size
+        0,                                 // sram offset
+        b / VTA_BATCH * tx_size * input_sets,  // dram offset
+        1,                                 // y size
+        tx_size * input_sets,              // x size
+        tx_size * input_sets,              // x stride
+        0,                                 // y pad
+        0,                                 // x pad
+        0,                                 // pop prev dep
+        b > 0,                             // pop next dep
+        0,                                 // push prev dep
+        0);                                // push next dep
+    insn_buf[insn_idx++] = getALUInsn(
+        opcode,                            // opcode
+        tx_size,                           // vector size
+        use_imm,                           // use imm
+        immediate[b / VTA_BATCH],          // imm
+        uop_compression,                   // uop compression
+        0,                                 // pop prev dep
+        0,                                 // pop next dep
+        0,                                 // push prev dep
+        1);                                // push next dep
+    insn_buf[insn_idx++] = get2DLoadStoreInsn(
+        VTA_OPCODE_STORE,                  // opcode
+        VTA_MEM_ID_OUT,                    // vector size
+        0,                                 // sram offset
+        b / VTA_BATCH * tx_size,           // dram offset
+        1,                                 // y size
+        tx_size,                           // x size
+        tx_size,                           // x stride
+        0,                                 // y pad
+        0,                                 // x pad
+        1,                                 // pop prev dep
+        0,                                 // pop next dep
+        1,                                 // push prev dep
+        0);                                // push next dep
+  }
+  // Finish
+  insn_buf[insn_idx++] = getFinishInsn(0, 1);
+  // Prepare the uop buffer
+  VTAUop * uop_buf = getMapALUUops(tx_size, uop_compression);
+  auto uop_size_ = (uop_compression) ? 1 : tx_size;
+
+#if VTA_DEBUG == 1
+  printInstruction(ins_size, insn_buf);
+  printMicroOp(uop_size, uop_buf);
+#endif
+
+  // Initialize the input/output data
+  acc_T **inputs = alloc2dArray<acc_T>(batch, vector_size * input_sets);
+  for (int i = 0; i < batch; i++) {
+    for (int j = 0; j < vector_size * input_sets; j++) {
+      if (opcode == VTA_ALU_OPCODE_MIN) {
+        inputs[i][j] = static_cast<acc_T>(
+            rand_r(&globalSeed) % (1LL << (VTA_INP_WIDTH - 1)) - (1LL << (VTA_INP_WIDTH - 2)));
+      } else if (opcode == VTA_ALU_OPCODE_MAX) {
+        inputs[i][j] = static_cast<acc_T>(
+            rand_r(&globalSeed) % (1LL << (VTA_INP_WIDTH - 1)) - (1LL << (VTA_INP_WIDTH - 2)));
+      } else if (opcode == VTA_ALU_OPCODE_ADD) {
+        inputs[i][j] = static_cast<acc_T>(
+            rand_r(&globalSeed) % (1LL << (VTA_INP_WIDTH - 2)) - (1LL << (VTA_INP_WIDTH - 3)));
+      } else if (opcode == VTA_ALU_OPCODE_SHR) {
+        inputs[i][j] = static_cast<acc_T>(
+            rand_r(&globalSeed) % (1LL << (VTA_SHR_ARG_BIT_WIDTH - 1)) - (1LL << (VTA_SHR_ARG_BIT_WIDTH - 2)));
+      }
+    }
+  }
+
+  // Compute reference output
+  out_T **outputs_ref = alloc2dArray<out_T>(batch, vector_size);
+  for (int i = 0; i < batch; i++) {
+    for (int j = 0; j < vector_size; j++) {
+      acc_T out_val = 0;
+      acc_T imm_val = immediate[i / VTA_BATCH];
+      acc_T src_val = inputs[i][j + vector_size];
+      if (opcode == VTA_ALU_OPCODE_MIN) {
+        if (!use_imm) {
+          out_val = inputs[i][j] < src_val ? inputs[i][j] : src_val;
+        } else {
+          out_val = inputs[i][j] < imm_val ? inputs[i][j] : imm_val;
+        }
+      } else if (opcode == VTA_ALU_OPCODE_MAX) {
+        if (!use_imm) {
+          out_val = inputs[i][j] > src_val ? inputs[i][j] : src_val;
+        } else {
+          out_val = inputs[i][j] > imm_val ? inputs[i][j] : imm_val;
+        }
+      } else if (opcode == VTA_ALU_OPCODE_ADD) {
+        if (!use_imm) {
+          out_val = inputs[i][j] + src_val;
+        } else {
+          out_val = inputs[i][j] + imm_val;
+        }
+      } else if (opcode == VTA_ALU_OPCODE_SHR) {
+        if (!use_imm) {
+          if (src_val >= 0) {
+            out_val = inputs[i][j] >> src_val;
+          } else {
+            out_val = inputs[i][j] << (0 - src_val);
+          }
+        } else {
+          if (imm_val >= 0) {
+            out_val = inputs[i][j] >> imm_val;
+          } else {
+            out_val = inputs[i][j] << (0 - imm_val);
+          }
+        }
+      }
+      outputs_ref[i][j] = (out_T) out_val;
+    }
+  }
+
+  // Pack input buffer
+  uint32_t *bias_buf = static_cast<uint32_t *>(
+      allocBuffer(VTA_ACC_ELEM_BYTES * batch * tx_size * input_sets));
+  packBuffer<uint32_t, 32, acc_T, VTA_ACC_WIDTH>(
+      bias_buf, inputs, batch, vector_size * input_sets, VTA_BATCH, VTA_BLOCK_OUT);
+
+  // Prepare output buffer
+  uint32_t *output_buf = static_cast<uint32_t *>(
+      allocBuffer(VTA_OUT_ELEM_BYTES * batch * tx_size * input_sets));
+
+  unsigned int done = 0;
+
+#ifdef NO_SIM
+
+  // Invoke the VTA
+  uint64_t t_fpga = vta_bsim(ins_size, (uint8_t *)insn_buf, (uint8_t *)uop_buf,
+		  (uint8_t *)NULL, (uint8_t *)NULL, (uint8_t *)bias_buf, (uint8_t *)output_buf);
+  // Report on timining
+  printf("INFO - Synchronization time: %.3fms\n", static_cast<float>(t_fpga) / 1E6);
+  printf("INFO - Throughput: %.3fGOps/s\n", static_cast<float>(vector_size * batch) / t_fpga);
+#else
+  vta_bsim_v1(ins_size, (ap_uint<128> *)insn_buf, ( ap_uint<8> *)uop_buf,
+		  ( ap_uint<8> *)NULL, ( ap_uint<8> *)NULL,
+		  ( ap_uint<8> *)bias_buf, ( ap_uint<8> *)output_buf);
+#endif
+
+  // Unpack output buffer
+  out_T **outputs = alloc2dArray<out_T>(batch, vector_size);
+  unpackBuffer<out_T, VTA_OUT_WIDTH, uint32_t, 32>(outputs,
+                                                   output_buf,
+                                                   batch,
+                                                   vector_size,
+                                                   VTA_BATCH,
+                                                   VTA_BLOCK_OUT);
+
+  // Correctness checks
+  int err = 0;
+  for (int i = 0; i < batch; i++) {
+    for (int j = 0; j < vector_size; j++) {
+      if (outputs_ref[i][j] != outputs[i][j]) {
+        err++;
+#if VTA_DEBUG == 1
+        printf("DEBUG - %d, %d: expected 0x%x but got 0x%x\n", i, j,
+               static_cast<int>(outputs_ref[i][j]),
+               static_cast<int>(outputs[i][j]));
+#endif
+      }
+      else {
+#if VTA_DEBUG == 1
+        printf("DEBUG - CORRECT %d, %d: expected 0x%d but got 0x%d\n", i, j,
+               static_cast<int>(outputs_ref[i][j]),
+               static_cast<int>(outputs[i][j]));
+#endif
+      }
+    }
+    }
+
+  // Free all allocated arrays
+  free(immediate);
+  free2dArray<acc_T>(inputs, batch, vector_size * input_sets);
+  free2dArray<out_T>(outputs_ref, batch, vector_size);
+  free2dArray<out_T>(outputs, batch, vector_size);
+  freeBuffer(insn_buf);
+  freeBuffer(uop_buf);
+  freeBuffer(bias_buf);
+  freeBuffer(output_buf);
+
+  if (err == 0) {
+    printf("INFO - ALU test successful!\n");
+    return 0;
+  } else {
+    printf("INFO - ALU test failed, got %d errors!\n", err);
+    return -1;
+  }
+}
+
+
+
+int blocked_gemm_test_bsim_v1(int batch, int channels, int block, bool uop_compression,
+    int virtual_threads) {
+   // Some assertions
+  assert(block % VTA_BLOCK_IN == 0);
+  assert(block % VTA_BLOCK_OUT == 0);
+  assert(block % VTA_BATCH == 0);
+  assert(channels % block == 0);
+  assert(batch % block == 0);
+
+  printf("=====================================================================================\n");
+  printf("INFO - Blocked GEMM test: batch=%d, channels=%d, block=%d, uop_comp=%d, vt=%d\n",
+         batch, channels, block, uop_compression, virtual_threads);
+
+  // Input/output channels
+  int in_feat = channels;
+  int out_feat = channels;
+  // Derive number of elements that need to be loaded/stored
+  int ins_size = batch / block * out_feat / block * (2 + in_feat / block * 3) + 2;
+  int uop_size = uop_compression ?
+      block / VTA_BATCH * virtual_threads :
+      block / VTA_BATCH * block / VTA_BLOCK_IN * block / VTA_BLOCK_OUT * virtual_threads;
+  int inp_size = batch / VTA_BATCH * in_feat / VTA_BLOCK_IN;
+  int wgt_size = in_feat / VTA_BLOCK_IN * out_feat / VTA_BLOCK_OUT;
+  int out_size = batch / VTA_BATCH * out_feat / VTA_BLOCK_OUT;
+  // Blocked buffer sizes (in terms of elements)
+  int inp_block_size = block / VTA_BATCH * block / VTA_BLOCK_IN;
+  int wgt_block_size = block / VTA_BLOCK_IN * block / VTA_BLOCK_OUT;
+  int out_block_size = block / VTA_BATCH * block / VTA_BLOCK_OUT;
+  // Make sure we don't exceed buffer bounds
+  assert(uop_size <= VTA_UOP_BUFF_DEPTH);
+  assert(inp_block_size <= VTA_INP_BUFF_DEPTH);
+  assert(wgt_block_size <= VTA_WGT_BUFF_DEPTH);
+  assert(out_block_size <= VTA_ACC_BUFF_DEPTH);
+
+  // Initialize instruction buffer
+  VTAGenericInsn *insn_buf =
+      static_cast<VTAGenericInsn *>(allocBuffer(sizeof(VTAGenericInsn) * ins_size));
+  int insn_idx = 0;
+
+  // Load uops
+  insn_buf[insn_idx++] = get1DLoadStoreInsn(VTA_OPCODE_LOAD,
+                                            VTA_MEM_ID_UOP,
+                                            0,
+                                            0,
+                                            uop_size,
+                                            0,
+                                            0,
+                                            0,
+                                            0);
+  // Iterate over batch blocks
+  for (int i = 0; i < batch; i += block) {
+    // Iterate over output channel blocks
+    for (int j = 0; j < out_feat; j += block) {
+      // Load bias block (pop next if not first, push prev)
+      insn_buf[insn_idx++] = get2DLoadStoreInsn(
+          VTA_OPCODE_LOAD,                                    // opcode
+          VTA_MEM_ID_ACC,                                     // type
+          0,                                                  // sram offset
+          (i / VTA_BATCH * out_feat + j) / VTA_BLOCK_OUT,     // dram offset
+          block / VTA_BATCH,                                  // y size
+          block / VTA_BLOCK_OUT,                              // x size
+          out_feat / VTA_BLOCK_OUT,                           // x stride
+          0,                                                  // y pad
+          0,                                                  // x pad
+          0,                                                  // pop prev dep
+          (i > 0 || j > 0),                                   // pop next dep
+          (virtual_threads == 1),                             // push prev dep
+          0);                                                 // push next dep
+      // Iterate over input channel blocks
+      for (int k = 0; k < in_feat; k += block * virtual_threads) {
+        for (int l = 0; l < block * virtual_threads; l += block) {
+          // Derive dependence flags
+          bool pop = (virtual_threads == 1) ?
+              1 :
+              (i > 0 || j > 0 || k > 0 || l > 0) && (k + l != block * virtual_threads - block);
+          bool push_prev = (virtual_threads == 1) ?
+              ((k + l) != in_feat - block) :
+              ((k + l) != in_feat - virtual_threads * block) &&
+              (
+                  (k + l != in_feat - block) ||
+                  (j != out_feat - block) ||
+                  (i != batch - block));
+          bool push_next = (k + l == in_feat - block);
+          // Load weight block (pop next)
+          insn_buf[insn_idx++] = get2DLoadStoreInsn(
+              VTA_OPCODE_LOAD,                                // opcode
+              VTA_MEM_ID_WGT,                                 // type
+              l / VTA_BLOCK_IN * block / VTA_BLOCK_OUT,       // sram offset
+              (j / VTA_BLOCK_OUT * in_feat + k + l) / VTA_BLOCK_IN,  // dram offset
+              block / VTA_BLOCK_OUT,                          // y size
+              block / VTA_BLOCK_IN,                           // x size
+              in_feat / VTA_BLOCK_IN,                         // x stride
+              0,                                              // y pad
+              0,                                              // x pad
+              0,                                              // pop prev dep
+              pop,                                            // pop next dep
+              0,                                              // push prev dep
+              0);                                             // push next dep
+          // Load input block (push next)
+          insn_buf[insn_idx++] = get2DLoadStoreInsn(
+              VTA_OPCODE_LOAD,                                // opcode
+              VTA_MEM_ID_INP,                                 // type
+              l / VTA_BLOCK_IN * block / VTA_BATCH,           // sram offset
+              (i / VTA_BATCH * in_feat + k + l) / VTA_BLOCK_IN,  // dram offset
+              block / VTA_BATCH,                              // y size
+              block / VTA_BLOCK_IN,                           // x size
+              in_feat / VTA_BLOCK_IN,                         // x stride
+              0,                                              // y pad
+              0,                                              // x pad
+              0,                                              // pop prev dep
+              0,                                              // pop next dep
+              0,                                              // push prev dep
+              1);                                             // push next dep
+          // Perform GEMM (pop prev, push prev if not last, push next if last)
+          insn_buf[insn_idx++] = getGEMMInsn(
+              l / block * uop_size / virtual_threads,         // uop offset
+              block / VTA_BATCH,                              // batch
+              block / VTA_BLOCK_IN,                           // in_feat
+              block / VTA_BLOCK_OUT,                          // out_feat
+              uop_compression,                                // uop_compression
+              1,                                              // pop_prev_dep
+              0,                                              // pop_next_dep
+              push_prev,                                      // push prev dep
+              push_next);                                     // push_next_dep
+        }
+      }
+      // Store output block (pop prev, push prev if not last)
+      insn_buf[insn_idx++] = get2DLoadStoreInsn(
+          VTA_OPCODE_STORE,                                   // opcode
+          VTA_MEM_ID_OUT,                                     // type
+          0,                                                  // sram offset
+          (i / VTA_BATCH * out_feat + j) / VTA_BLOCK_OUT,     // dram offset
+          block / VTA_BATCH,                                  // y size
+          block / VTA_BLOCK_OUT,                              // x size
+          out_feat / VTA_BLOCK_OUT,                           // x stride
+          0,                                                  // y pad
+          0,                                                  // x pad
+          1,                                                  // pop prev dep
+          0,                                                  // pop next dep
+          1,                                                  // pop prev dep
+          0);                                                 // push next dep
+    }
+  }
+  // Finish
+  insn_buf[insn_idx++] = getFinishInsn(0, 1);
+
+  // Prepare the uop buffer
+  VTAUop * uop_buf = getGEMMUops(
+      block / VTA_BATCH,
+      block / VTA_BLOCK_IN,
+      block / VTA_BLOCK_OUT,
+      uop_compression,
+      virtual_threads > 1);
+
+#if VTA_DEBUG == 1
+  printInstruction(ins_size, insn_buf);
+  printMicroOp(uop_size, uop_buf);
+#endif
+
+  // Initialize inputs
+  inp_T **inputs = allocInit2dArray<inp_T>(batch, in_feat);
+  // Initialize weights
+  wgt_T **weights = allocInit2dArray<wgt_T>(out_feat, in_feat);
+  // Initialize biases
+  acc_T **biases = allocInit2dArray<acc_T>(batch, out_feat);
+
+  // Reference GEMM implementation
+  out_T **outputs_ref = alloc2dArray<out_T>(batch, out_feat);
+  for (int i = 0; i < batch; i++) {
+    for (int j = 0; j < out_feat; j++) {
+      acc_T sum = biases[i][j];
+      for (int k = 0; k < in_feat; k++) {
+        sum += (acc_T) (inputs[i][k] * weights[j][k]);
+      }
+      // Set
+      outputs_ref[i][j] = (out_T) sum;
+    }
+  }
+
+  // Prepare the input buffer
+  uint32_t *input_buf = static_cast<uint32_t *>(
+      allocBuffer(VTA_INP_ELEM_BYTES * inp_size));
+  packBuffer<uint32_t, 32, inp_T, VTA_INP_WIDTH>(input_buf,
+                                                 inputs,
+                                                 batch,
+                                                 in_feat,
+                                                 VTA_BATCH,
+                                                 VTA_BLOCK_IN);
+  // Prepare the weight buffer
+  uint32_t *weight_buf = static_cast<uint32_t *>(
+      allocBuffer(VTA_WGT_ELEM_BYTES * wgt_size));
+  packBuffer<uint32_t, 32, wgt_T, VTA_WGT_WIDTH>(weight_buf,
+                                                 weights,
+                                                 out_feat,
+                                                 in_feat,
+                                                 VTA_BLOCK_OUT,
+                                                 VTA_BLOCK_IN);
+  // Prepare the bias buffer
+  uint32_t *bias_buf = static_cast<uint32_t *>(
+      allocBuffer(VTA_ACC_ELEM_BYTES * out_size));
+  packBuffer<uint32_t, 32, acc_T, VTA_ACC_WIDTH>(bias_buf,
+                                                 biases,
+                                                 batch,
+                                                 out_feat,
+                                                 VTA_BATCH,
+                                                 VTA_BLOCK_OUT);
+  // Prepare the output buffer
+  uint32_t *output_buf = static_cast<uint32_t *>(
+      allocBuffer(VTA_INP_ELEM_BYTES * out_size));
+
+  int uop_size_ = (uop_compression) ? block / VTA_BATCH : block / VTA_BATCH * block / VTA_BLOCK_IN * block / VTA_BLOCK_OUT;
+  if (virtual_threads > 1) uop_size_ *= 2;
+
+  uint32_t done = 0;
+#ifdef NO_SIM
+  // Invoke the VTA
+  uint64_t t_fpga = vta_bsim(ins_size,
+                        (uint8_t *)insn_buf,
+                        (uint8_t *)uop_buf,
+                        (uint8_t *)input_buf,
+                        (uint8_t *)weight_buf,
+                        (uint8_t *)bias_buf,
+                        (uint8_t *)output_buf
+                        );
+  // Report on timining
+  printf("INFO - Synchronization time: %.3lfms\n", static_cast<float>(t_fpga) / 1E6);
+  printf("INFO - Throughput: %.3lfGOPs/s\n",
+         static_cast<float>(batch) * in_feat * out_feat * 2 / t_fpga);
+#else
+  // Invoke the VTA
+  vta_bsim_v1(ins_size,
+      ( ap_uint<128> *) insn_buf,
+      ( ap_uint<8> *) uop_buf,
+      ( ap_uint<8> *) input_buf,
+      ( ap_uint<8> *) weight_buf,
+      ( ap_uint<8> *) bias_buf,
+      ( ap_uint<8> *) output_buf);
+#endif
+
+  // Unpack output data
+  out_T **outputs = alloc2dArray<out_T>(batch, out_feat);
+  unpackBuffer<out_T, VTA_OUT_WIDTH, uint32_t, 32>(outputs,
+                                                   output_buf,
+                                                   batch,
+                                                   out_feat,
+                                                   VTA_BATCH,
+                                                   VTA_BLOCK_OUT);
+
+  // Correctness checks
+  int err = 0;
+  for (int i = 0; i < batch; i++) {
+    for (int j = 0; j < out_feat; j++) {
+      if (outputs_ref[i][j] != outputs[i][j]) {
+        err++;
+#if VTA_DEBUG == 1
+        printf("DEBUG - %d, %d: expected 0x%x but got 0x%x\n", i, j,
+               static_cast<int>(outputs_ref[i][j]),
+               static_cast<int>(outputs[i][j]));
+#endif
+      }
+    }
+  }
+
+  // Free all allocated arrays
+  free2dArray<inp_T>(inputs, batch, in_feat);
+  free2dArray<wgt_T>(weights, out_feat, in_feat);
+  free2dArray<acc_T>(biases, batch, out_feat);
+  free2dArray<out_T>(outputs_ref, batch, out_feat);
+  free2dArray<out_T>(outputs, batch, out_feat);
+  freeBuffer(insn_buf);
+  freeBuffer(uop_buf);
+  freeBuffer(input_buf);
+  freeBuffer(weight_buf);
+  freeBuffer(bias_buf);
+  freeBuffer(output_buf);
+
+  if (err == 0) {
+    printf("INFO - Blocked GEMM test successful!\n");
+    return 0;
+  } else {
+    printf("INFO - Blocked GEMM test failed, got %d errors!\n", err);
+    return -1;
+  }
+}
+
+
+int gemm_test_bsim_v1(int batch, int in_channels, int out_channels, bool uop_compression) {
+  // Some assertions
+  assert(batch % VTA_BATCH == 0);
+  assert(in_channels % VTA_BLOCK_IN == 0);
+  assert(out_channels % VTA_BLOCK_OUT == 0);
+
+  printf("=====================================================================================\n");
+  printf("INFO - Blocked GEMM test: batch=%d, in_channels=%d, out_channels=%d, uop_comp=%d\n",
+         batch, in_channels, out_channels, uop_compression);
+
+  // Derive number of elements that need to be loaded/stored
+  int ins_size = 7;
+  int uop_size = uop_compression ?
+      batch / VTA_BATCH :
+      batch / VTA_BATCH * in_channels / VTA_BLOCK_IN * out_channels / VTA_BLOCK_OUT;
+  int inp_size = batch / VTA_BATCH * in_channels / VTA_BLOCK_IN;
+  int wgt_size = in_channels / VTA_BLOCK_IN * out_channels / VTA_BLOCK_OUT;
+  int out_size = batch / VTA_BATCH * out_channels / VTA_BLOCK_OUT;
+  // Make sure we don't exceed buffer bounds
+  assert(uop_size <= VTA_UOP_BUFF_DEPTH);
+  assert(inp_size <= VTA_INP_BUFF_DEPTH);
+  assert(wgt_size <= VTA_WGT_BUFF_DEPTH);
+  assert(out_size <= VTA_ACC_BUFF_DEPTH);
+
+  // Initialize instruction buffer
+  VTAGenericInsn *insn_buf =
+      static_cast<VTAGenericInsn *>(allocBuffer(sizeof(VTAGenericInsn) * ins_size));
+  int insn_idx = 0;
+
+  // Load uops
+  insn_buf[insn_idx++] = get1DLoadStoreInsn(
+      VTA_OPCODE_LOAD,
+      VTA_MEM_ID_UOP,
+      0,
+      0,
+      uop_size,
+      0,
+      0,
+      0,
+      0);
+  // Load bias
+  insn_buf[insn_idx++] = get1DLoadStoreInsn(
+      VTA_OPCODE_LOAD,                                    // opcode
+      VTA_MEM_ID_ACC,                                     // type
+      0,                                                  // sram offset
+      0,                                                  // dram offset
+      out_size,                                           // size
+      0,                                                  // pop prev dep
+      0,                                                  // pop next dep
+      1,                                                  // push prev dep
+      0);                                                 // push next dep
+  // Load weight block (pop next)
+  insn_buf[insn_idx++] = get1DLoadStoreInsn(
+      VTA_OPCODE_LOAD,                                    // opcode
+      VTA_MEM_ID_WGT,                                     // type
+      0,                                                  // sram offset
+      0,                                                  // dram offset
+      wgt_size,                                           // size
+      0,                                                  // pop prev dep
+      1,                                                  // pop next dep
+      0,                                                  // push prev dep
+      0);                                                 // push next dep
+  // Load input block (push next)
+  insn_buf[insn_idx++] = get1DLoadStoreInsn(
+      VTA_OPCODE_LOAD,                                    // opcode
+      VTA_MEM_ID_INP,                                     // type
+      0,                                                  // sram offset
+      0,                                                  // dram offset
+      inp_size,                                           // size
+      0,                                                  // pop prev dep
+      0,                                                  // pop next dep
+      0,                                                  // push prev dep
+      1);                                                 // push next dep
+  // Perform GEMM (pop prev, push prev if not last, push next if last)
+  insn_buf[insn_idx++] = getGEMMInsn(
+      0,                                                  // uop offset
+      batch / VTA_BATCH,                                  // batch
+      in_channels / VTA_BLOCK_IN,                         // in_channels
+      out_channels / VTA_BLOCK_OUT,                       // out_channels
+      uop_compression,                                    // uop_compression
+      1,                                                  // pop_prev_dep
+      0,                                                  // pop_next_dep
+      0,                                                  // push prev dep
+      1);                                                 // push_next_dep
+  // Store output block (pop prev, push prev if not last)
+  insn_buf[insn_idx++] = get1DLoadStoreInsn(
+      VTA_OPCODE_STORE,                                   // opcode
+      VTA_MEM_ID_OUT,                                     // type
+      0,                                                  // sram offset
+      0,                                                  // dram offset
+      out_size,                                           // size
+      1,                                                  // pop prev dep
+      0,                                                  // pop next dep
+      1,                                                  // push prev dep
+      0);                                                 // push next dep
+  // Finish
+  insn_buf[insn_idx++] = getFinishInsn(0, 1);
+
+  // Prepare the uop buffer
+  VTAUop * uop_buf = getGEMMUops(
+      batch / VTA_BATCH,
+      in_channels / VTA_BLOCK_IN,
+      out_channels / VTA_BLOCK_OUT,
+      uop_compression,
+      0);
+
+#if VTA_DEBUG == 1
+  printInstruction(ins_size, insn_buf);
+  printMicroOp(uop_size, uop_buf);
+#endif
+
+  // Initialize inputs
+  inp_T **inputs = allocInit2dArray<inp_T>(batch, in_channels);
+  // Initialize weights
+  wgt_T **weights = allocInit2dArray<wgt_T>(out_channels, in_channels);
+  // Initialize biases
+  acc_T **biases = allocInit2dArray<acc_T>(batch, out_channels);
+
+  // Reference GEMM implementation
+  out_T **outputs_ref = alloc2dArray<out_T>(batch, out_channels);
+  for (int i = 0; i < batch; i++) {
+    for (int j = 0; j < out_channels; j++) {
+      acc_T sum = biases[i][j];
+      for (int k = 0; k < in_channels; k++) {
+        sum += (acc_T) (inputs[i][k] * weights[j][k]);
+      }
+      // Set
+      outputs_ref[i][j] = (out_T) sum;
+    }
+  }
+
+  // Prepare the input buffer
+  uint32_t *input_buf = static_cast<uint32_t *>(allocBuffer(VTA_INP_ELEM_BYTES * inp_size));
+  packBuffer<uint32_t, 32, inp_T, VTA_INP_WIDTH>(input_buf,
+                                                 inputs,
+                                                 batch,
+                                                 in_channels,
+                                                 VTA_BATCH,
+                                                 VTA_BLOCK_IN);
+  // Prepare the weight buffer
+  uint32_t *weight_buf = static_cast<uint32_t *>(allocBuffer(VTA_WGT_ELEM_BYTES * wgt_size));
+  packBuffer<uint32_t, 32, wgt_T, VTA_WGT_WIDTH>(weight_buf,
+                                                 weights,
+                                                 out_channels,
+                                                 in_channels,
+                                                 VTA_BLOCK_OUT,
+                                                 VTA_BLOCK_IN);
+  // Prepare the bias buffer
+  uint32_t *bias_buf = static_cast<uint32_t *>(allocBuffer(VTA_ACC_ELEM_BYTES * out_size));
+  packBuffer<uint32_t, 32, acc_T, VTA_ACC_WIDTH>(bias_buf,
+                                                 biases,
+                                                 batch,
+                                                 out_channels,
+                                                 VTA_BATCH,
+                                                 VTA_BLOCK_OUT);
+  // Prepare the output buffer
+  uint32_t *output_buf = static_cast<uint32_t *>(allocBuffer(VTA_OUT_ELEM_BYTES * out_size));
+
+  uint32_t done = 0;
+#ifdef NO_SIM
+  // Invoke the VTA
+  uint64_t t_fpga = vta_bsim(ins_size,
+                        (uint8_t *)insn_buf,
+                        (uint8_t *)uop_buf,
+                        (uint8_t *)input_buf,
+                        (uint8_t *)weight_buf,
+                        (uint8_t *)bias_buf,
+                        (uint8_t *)output_buf);
+  // Report on timining
+  printf("INFO - Synchronization time: %.3lfms\n", static_cast<float>(t_fpga) / 1E6);
+  printf("INFO - Throughput: %.3lfGOPs/s\n",
+         static_cast<float>(batch) * in_channels * out_channels * 2 / t_fpga);
+#else
+  // Invoke the VTA
+  vta_bsim_v1(ins_size,
+      (ap_uint<128> *) insn_buf,
+      (ap_uint<8> *) uop_buf,
+      (ap_uint<8> *) input_buf,
+      (ap_uint<8> *) weight_buf,
+      (ap_uint<8> *) bias_buf,
+      (ap_uint<8> *) output_buf);
 #endif
 
   // Unpack output data

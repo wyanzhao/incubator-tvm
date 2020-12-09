@@ -28,7 +28,10 @@
 
 #include "../src/vta.h"
 #include "../src/vta_bsim.h"
+#include "../src/vta_bsim_v1.h"
 #include "../../../tests/hardware/common/test_lib.h"
+
+//#define VTA_DEBUG 1
 
 int main(void) {
 #if DEBUG == 1
@@ -38,7 +41,7 @@ int main(void) {
     int status = 0;
 
     // Run ALU test (vector-scalar operators)
-    status |= alu_test(VTA_ALU_OPCODE_MIN, true, VTA_BLOCK_OUT, 128, true);
+/*     status |= alu_test(VTA_ALU_OPCODE_MIN, true, VTA_BLOCK_OUT, 128, true);
     status |= alu_test(VTA_ALU_OPCODE_MIN, true, VTA_BLOCK_OUT, 128, false);
     status |= alu_test(VTA_ALU_OPCODE_MAX, true, VTA_BLOCK_OUT, 128, true);
     status |= alu_test(VTA_ALU_OPCODE_MAX, true, VTA_BLOCK_OUT, 128, false);
@@ -62,7 +65,33 @@ int main(void) {
     status |= blocked_gemm_test(256, 256, VTA_BLOCK_OUT*4, false, 1);
 
     // Simple GEMM unit test
-    status |= gemm_test(4 * VTA_BATCH, 4 * VTA_BLOCK_OUT, 4 * VTA_BLOCK_IN, false);
+    status |= gemm_test(4 * VTA_BATCH, 4 * VTA_BLOCK_OUT, 4 * VTA_BLOCK_IN, false); */
+
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MIN, true, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MIN, true, VTA_BLOCK_OUT, 128, false);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MAX, true, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MAX, true, VTA_BLOCK_OUT, 128, false);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_ADD, true, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_ADD, true, VTA_BLOCK_OUT, 128, false);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_SHR, true, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_SHR, true, VTA_BLOCK_OUT, 128, false);
+
+    // Run ALU test (vector-vector operators)
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MIN, false, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MIN, false, VTA_BLOCK_OUT, 128, false);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MAX, false, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_MAX, false, VTA_BLOCK_OUT, 128, false);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_ADD, false, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_ADD, false, VTA_BLOCK_OUT, 128, false);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_SHR, false, VTA_BLOCK_OUT, 128, true);
+    status |= alu_test_bsim_v1(VTA_ALU_OPCODE_SHR, false, VTA_BLOCK_OUT, 128, false);
+
+    // Run blocked GEMM test
+    status |= blocked_gemm_test_bsim_v1(256, 256, VTA_BLOCK_OUT*4, false, 2);
+    status |= blocked_gemm_test_bsim_v1(256, 256, VTA_BLOCK_OUT*4, false, 1);
+
+    // // Simple GEMM unit test
+    status |= gemm_test_bsim_v1(4 * VTA_BATCH, 4 * VTA_BLOCK_OUT, 4 * VTA_BLOCK_IN, false);
 
     return status;
 }

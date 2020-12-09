@@ -79,6 +79,7 @@ uint64_t vta_bsim(uint32_t instr_count,
 
 #include "../../../hardware/xilinx/src/vta.h"
 #include "../../../hardware/xilinx/src/vta_bsim.h"
+#include "../../../hardware/xilinx/src/vta_bsim_v1.h"
 
 #endif  // NO_SIM
 
@@ -340,6 +341,7 @@ int alu_test(int opcode, bool use_imm, int batch, int vector_size, bool uop_comp
 
 
 int alu_test_bsim(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression);
+int alu_test_bsim_v1(int opcode, bool use_imm, int batch, int vector_size, bool uop_compression);
 
 /*!
 * \brief VTA blocked GEMM unit test.
@@ -351,6 +353,9 @@ int alu_test_bsim(int opcode, bool use_imm, int batch, int vector_size, bool uop
 */
 int blocked_gemm_test_bsim(int batch, int channels, int block, bool uop_compression,
   int virtual_threads);
+int blocked_gemm_test_bsim_v1(int batch, int channels, int block, bool uop_compression,
+  int virtual_threads);
+
 
 int blocked_gemm_test(int batch, int channels, int block, bool uop_compression,
   int virtual_threads);
@@ -364,6 +369,7 @@ int blocked_gemm_test(int batch, int channels, int block, bool uop_compression,
 * \return Number of errors from the test run.
 */
 int gemm_test_bsim(int batch, int in_channels, int out_channels, bool uop_compression);
+int gemm_test_bsim_v1(int batch, int in_channels, int out_channels, bool uop_compression);
 
 int gemm_test(int batch, int in_channels, int out_channels, bool uop_compression);
 
