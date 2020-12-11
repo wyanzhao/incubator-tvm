@@ -111,4 +111,4 @@ def alu(instr, uop_mem, acc_mem, out_mem):
     with hcl.Stage('alu'):
         domain = (hcl.cast(hcl.UInt(32), iter_out.v), hcl.cast(hcl.UInt(32), iter_in.v),
                   (hcl.cast(hcl.UInt(32), uop_end.v-uop_bgn.v)))
-        hcl.mutate(domain, fmutate)
+        hcl.mutate(domain, fmutate, name="fmutate")
