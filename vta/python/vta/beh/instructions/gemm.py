@@ -89,9 +89,9 @@ def gemm_core(reset_reg, iter_out, iter_in, uop_bgn, uop_end, dst_factor_out, ds
         domain = (hcl.cast(hcl.UInt(32), iter_out.v), hcl.cast(hcl.UInt(32), iter_in.v),
                   (hcl.cast(hcl.UInt(32), uop_end.v-uop_bgn.v)))
         with hcl.if_(reset_reg.v == 1):
-            hcl.mutate(domain, fmutate_reset)
+            hcl.mutate(domain, fmutate_reset, name="fmutate_reset")
         with hcl.else_():
-            hcl.mutate(domain, fmutate)
+            hcl.mutate(domain, fmutate, name="fmutate")
 
 def customize_gemm_core(batch=env.BATCH, blkin=env.BLOCK_IN, blkout=env.BLOCK_OUT):
     return partial(gemm_core, batch=batch, blkin=blkin, blkout=blkout)
